@@ -165,7 +165,7 @@ def expand_key(master_key):
     print('iteration size', iteration_size)
     i = 1
     print('len(key_columns)', len(key_columns))
-    while len(key_columns) < 9: # (10+ 1) * 4:
+    while len(key_columns) < (10+ 1) * 4:
         # Copy previous word.
         word = list(key_columns[-1])
         print('----------------------\n',len(key_columns))
@@ -192,6 +192,9 @@ def expand_key(master_key):
         word = xor_bytes(word, key_columns[-iteration_size])
         print('final word', word)
         key_columns.append(word)
+    # Group key words in 4x4 byte matrices.
+    print('final key_columns\n', key_columns)
+    return [key_columns[4*i : 4*(i+1)] for i in range(len(key_columns) // 4)]
 
 def main_round(state, round_key):
   sub_bytes(state)
@@ -235,10 +238,24 @@ def decrypt(ciphertext, key):
   add_round_key(state,key_schedule[0])
   return state
 
+def printkeys(keys):
+    for k in range(11):
+        print("---------------------------------\n")
+        print("Key #", k)
+        for i in range(4):
+            print(keys[k][i])
+            # for j in range(4):
+            #     print(str(keys[k][i][j]), " ", end='')
+            # print("\n")
+        print("---------------------------------\n")
+
 state = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,0]]
 check_mix_columns(state)
 check_inv_mix_columns(state)
 check_add_round_key(state)
 
 key = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
-expand_key(key)
+keys = expand_key(key)
+print('keys\n', keys)
+print('keys shape: \t', len(keys), len(keys[0]), len(keys[0][0]))
+printkeys(keys)
