@@ -12,7 +12,7 @@ def matrix2bytes(matrix):
 
 def xor_bytes(a, b):
     """ Returns a new byte array with the elements xor'ed. """
-    print('zip a,b', str(zip(a, b)))
+    # print('zip a,b', str(zip(a, b)))
     return [i^j for i, j in zip(a, b)]
 
 
@@ -159,45 +159,32 @@ def expand_key(master_key):
     """
     # Initialize round keys with raw key material.
     key_columns = bytes2matrix(master_key)
-    print('key_columns matrix')
-    printmatrix(key_columns)
     iteration_size = len(master_key) // 4
-    print('iteration size', iteration_size)
     i = 1
-    print('len(key_columns)', len(key_columns))
     while len(key_columns) < (10+ 1) * 4:
         # Copy previous word.
         word = list(key_columns[-1])
-        print('----------------------\n',len(key_columns))
-        print('previous word', word)
         # Perform schedule_core once every "row".
         if len(key_columns) % iteration_size == 0:
             # Circular shift.
             word.append(word.pop(0))
-            print('word circ shifted: ', word)
             # Map to S-BOX.
             word = [s_box[b] for b in word]
-            print('word mapped to sbox', word)
             # XOR with first byte of R-CON, since the others bytes of R-CON are 0.
             word[0] ^= r_con[i]
-            print('word XOR first byte of R-CON: word, i, r_con[i]', word, i, r_con[i])
             i += 1
         elif len(master_key) == 32 and len(key_columns) % iteration_size == 4:
-            print('here')
             # Run word through S-box in the fourth iteration when using a
             # 256-bit key.
             word = [s_box[b] for b in word]
-        print('prev iteration word', key_columns[-iteration_size])
         # XOR with equivalent word from previous iteration.
         word = xor_bytes(word, key_columns[-iteration_size])
-        print('final word', word)
         key_columns.append(word)
     # Group key words in 4x4 byte matrices.
-    print('final key_columns\n', key_columns)
     return [key_columns[4*i : 4*(i+1)] for i in range(len(key_columns) // 4)]
 
 def main_round(state, round_key):
-  sub_bytes(state)
+  sub_bytes(state, s_box=s_box)
   shift_rows(state)
   mix_columns(state)
   add_round_key(state,round_key)
@@ -207,17 +194,17 @@ def inv_main_round(state,round_key):
   add_round_key(state,round_key)
   inv_mix_columns(state)
   inv_shift_rows(state)
-  inv_sub_bytes(state)
+  inv_sub_bytes(state, s_box)
 
 def final_round(state, round_key):
-  sub_bytes(state)
+  sub_bytes(state, s_box)
   shift_rows(state)
   add_round_key(state,round_key)
 
 def inv_final_round(state,round_key):
   add_round_key(state,round_key)
   inv_shift_rows(state)
-  inv_sub_bytes(state)
+  inv_sub_bytes(state, s_box)
 
 def encrypt(plaintext,key):
   key_schedule = expand_key(key)
@@ -249,7 +236,62 @@ def printkeys(keys):
             # print("\n")
         print("---------------------------------\n")
 
+def check_main_round():
+    print("\n-------------------Checking Main Round-----------------\n")
+    test = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,0]]
+    print("original state")
+    printmatrix(test)
+    key = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    print("original key")
+    print(key)
+    keys = expand_key(key)
+    # print(keys[0])
+    main_round(test, keys[0])
+    print("new state")
+    printmatrix(test)
+
+def inv_main_round(state,round_key):
+  add_round_key(state,round_key)
+  inv_mix_columns(state)
+  inv_shift_rows(state)
+  inv_sub_bytes(state, s_box)
+
+def final_round(state, round_key):
+  sub_bytes(state, s_box)
+  shift_rows(state)
+  add_round_key(state,round_key)
+
+def inv_final_round(state,round_key):
+  add_round_key(state,round_key)
+  inv_shift_rows(state)
+  inv_sub_bytes(state, s_box)
+
+def encrypt(plaintext,key):
+  key_schedule = expand_key(key)
+  state = plaintext.copy()
+  add_round_key(state,key_schedule[0])
+  for i in range(9):
+    main_round(state,key_schedule[i+1])
+  final_round(state,key_schedule[10])
+  return state
+
+
+def decrypt(ciphertext, key):
+  key_schedule = expand_key(key)
+  state = ciphertext.copy()
+  inv_final_round(state,key_schedule[10])
+  for i in range(9):
+    inv_main_round(state,key_schedule[9-i])
+  add_round_key(state,key_schedule[0])
+  return state
+
+def check_encrypt():
+    text=[[2,4,8,10], [1,3,7,9], [2,4,8,10], [1,3,7,9]]
+    key = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    printmatrix(encrypt(text, key))
+
 state = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,0]]
+
 check_mix_columns(state)
 check_inv_mix_columns(state)
 check_add_round_key(state)
@@ -259,3 +301,7 @@ keys = expand_key(key)
 print('keys\n', keys)
 print('keys shape: \t', len(keys), len(keys[0]), len(keys[0][0]))
 printkeys(keys)
+
+# check_main_round()
+check_encrypt()
+

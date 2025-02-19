@@ -292,7 +292,7 @@ void xor_bytes(uint8_t *a, uint8_t *b) //assume 4 bytes
     for (int i=0; i<4; i++)
     {
         // uint64_t temp = (c2 >> 8*i) & 0xFF;
-        printf("\nai, bi, ci: %x %x %x", a[i], b[i], a[i]^b[i]);
+        // printf("\nai, bi, ci: %x %x %x", a[i], b[i], a[i]^b[i]);
         // a[i] = (uint8_t) temp;
         a[i] = a[i]^b[i];
     }
@@ -316,23 +316,15 @@ void expand_key(uint8_t *master_key, uint8_t keys[11][4][4]){
     while (kclen < 44)
     {
         getrow(kclen-1, keycolumns, word);
-        printf("-----------------------\n%d\nprevious word:", kclen);
         printarraydec(4, word);
         if (kclen % iteration_size == 0)
         {
-            printf("kclen\%4 == 0\t now circular shifting");
             //circular shift
             circularshift(4, word);
-            printarraydec(4, word);
-            printf("\nnow mapping to sbox");
             //Map to S-Box
             maptosbox(word, s_box);
-            printarraydec(4, word);
-            printf("\nnow XOR with RCON");
             // XOR with first byte of R-CON, since the others bytes of R-CON are 0.
             word[0] ^= r_con[i];
-            printf("\nRCON[%d]: %d", i, r_con[i]);
-            printarraydec(4, word);
             i += 1;
         }
         //removed as master key length is required to be 32 bytes for this 
@@ -342,14 +334,9 @@ void expand_key(uint8_t *master_key, uint8_t keys[11][4][4]){
         //     printf("kclen\%4 == 4\t now circular shifting");
 
         // }
-        printf("\nnow XOR with previous word");
         // # XOR with equivalent word from previous iteration.
         getrow(kclen-iteration_size, keycolumns, previous_iteration_word);
-        printf("\nprevious word:");
-        printarraydec(4, previous_iteration_word);
         xor_bytes(word, previous_iteration_word);
-        printf("\nfinal word:");
-        printarraydec(4, word);
         //append word to keycolumns
         for (int i=0; i<4; i++){keycolumns[kclen][i] = word[i];}
         kclen += 1;
@@ -387,6 +374,87 @@ void printkeys(uint8_t keys[11][4][4])
     }
 }
 
+void main_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{ 
+    sub_bytes(state, s_box);
+    shift_rows(state);
+    mix_columns(state);
+    add_round_key(state, round_key);
+}
+
+void check_main_round()
+{
+    printf("\n-------------------Checking Main Round-----------------\n");
+    uint8_t test[4][4] = {{1,2,3,4},{5,6,7,8},{9,10,11,12},{13,14,15,0}};
+    printf("\noriginal state");
+    print4x4(test);
+    uint8_t key[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    printf("\noriginal key");
+    print4x4(key);
+    uint8_t keys[11][4][4];
+    expand_key(key, keys);
+    main_round(test, keys[0]);
+    printf("\nnew state");
+    print4x4(test);
+}
+
+void inv_main_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  add_round_key(state,round_key);
+  inv_mix_columns(state);
+  inv_shift_rows(state);
+  inv_sub_bytes(state, s_box);
+}
+void final_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  sub_bytes(state, s_box);
+  shift_rows(state);
+  add_round_key(state, round_key);
+}
+
+void inv_final_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  add_round_key(state,round_key);
+  inv_shift_rows(state);
+  inv_sub_bytes(state, inv_s_box);
+}
+
+
+void encrypt(uint8_t state[4][4], uint8_t round_key[16])
+{
+  uint8_t keys[11][4][4];
+  expand_key(round_key, keys);
+//   state = plaintext.copy();
+  add_round_key(state, keys[0]);
+  for (int i=0; i<9; i++)
+  {
+    main_round(state, keys[i+1]);
+  }
+    //(i in range(9)):
+  final_round(state, keys[10]);
+//   return state; //state is already alterred
+}
+
+void checkEncrypt()
+{
+    uint8_t text[4][4]={{2,4,8,10}, {1,3,7,9}, {2,4,8,10}, {1,3,7,9}};
+    uint8_t key[4][4] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    encrypt(text, key);
+    print4x4(text);
+}
+
+void decrypt(uint8_t state[4][4], uint8_t round_key[4][4]){
+  uint8_t keys[11][4][4];
+  expand_key(round_key, keys);
+//   state = ciphertext.copy(); Should already be set to cipher text
+  inv_final_round(state, keys[10]);
+  for (int i=0; i<9; i++){
+    inv_main_round(state, keys[9-i]);
+  }
+  add_round_key(state, keys[0]);
+//   return state; //do not need to return.
+}
+
 int main(void)
 {
     uint8_t test[4][4] = {{1,2,3,4},{5,6,7,8},{9,10,11,12},{13,14,15,0}};
@@ -399,11 +467,13 @@ int main(void)
     // print4x4(test);
     // inv_sub_bytes(test, inv_s_box);
     // print4x4(test);
-    check_mix_columns(test);
-    check_inv_mix_columns(test);
-    check_add_round_key(test);
-    uint8_t key[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
-    uint8_t keys[11][4][4];
-    expand_key(key, keys);
-    printkeys(keys);
+    // check_mix_columns(test);
+    // check_inv_mix_columns(test);
+    // check_add_round_key(test);
+    // uint8_t key[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    // uint8_t keys[11][4][4];
+    // expand_key(key, keys);
+    // printkeys(keys);
+    // check_main_round();
+    checkEncrypt();
 }

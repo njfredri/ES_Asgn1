@@ -29,31 +29,6 @@ uint8_t get_mask(uint8_t* m, uint8_t len)
   return 0x00;
 }
 
-uint8_t get_key(uint8_t* k, uint8_t len)
-{
-	aes_indep_key(k);
-	return 0x00;
-}
-
-uint8_t get_pt(uint8_t* pt, uint8_t len)
-{
-    aes_indep_enc_pretrigger(pt);
-
-	trigger_high();
-
-  #ifdef ADD_JITTER
-  for (volatile uint8_t k = 0; k < (*pt & 0x0F); k++);
-  #endif
-
-	aes_indep_enc(pt); /* encrypting the data block */
-	trigger_low();
-
-    aes_indep_enc_posttrigger(pt);
-
-	simpleserial_put('r', 16, pt);
-	return 0x00;
-}
-
 uint8_t reset(uint8_t* x, uint8_t len)
 {
     // Reset key here if needed
@@ -195,7 +170,9 @@ void inv_shift_rows(uint8_t s[4][4]){
     s[0][3] = s[1][3]; s[1][3] = s[2][3]; s[2][3] = s[3][3]; s[3][3] = temp;
 }
 
-
+// static uint8_t received_data[16];
+static uint8_t master_key[16];
+// static uint8_t plain_te[16];
 
 #if SS_VER == SS_VER_2_1
 uint8_t aes(uint8_t cmd, uint8_t scmd, uint8_t len, uint8_t *buf)
@@ -203,50 +180,39 @@ uint8_t aes(uint8_t cmd, uint8_t scmd, uint8_t len, uint8_t *buf)
     uint8_t req_len = 0;
     uint8_t err = 0;
     uint8_t mask_len = 0;
-    if (scmd & 0x04) {
-        // Mask has variable length. First byte encodes the length
-        mask_len = buf[req_len];
-        req_len += 1 + mask_len;
-        if (req_len > len) {
-            return SS_ERR_LEN;
-        }
-        err = get_mask(buf + req_len - mask_len, mask_len);
-        if (err)
-            return err;
-    }
-
-    if (scmd & 0x02) {
-        req_len += 16;
-        if (req_len > len) {
-            return SS_ERR_LEN;
-        }
-        err = get_key(buf + req_len - 16, 16);
-        if (err)
-            return err;
-    }
-    if (scmd & 0x01) {
-        req_len += 16;
-        if (req_len > len) {
-            return SS_ERR_LEN;
-        }
-        err = get_pt(buf + req_len - 16, 16);
-        if (err)
-            return err;
-    }
-
-    if (len != req_len) {
-        return SS_ERR_LEN;
-    }
-
+    
     return 0x00;
 
 }
 #endif
 
-void send_message() {
-    const char msg[] = "Help me\n";  // Message to send
+void send_message(char *msg) {
+    // const char msg[] = "Help me\n";  // Message to send
     simpleserial_put('r', strlen(msg), (uint8_t *)msg);
 }
+
+uint8_t get_key(uint8_t* k, uint8_t len)
+{
+    // old
+	// aes_indep_key(k);
+	// return 0x00;
+    // new
+    for (int i=0; i<len; i++)
+    {
+        master_key[i] = k[i];
+    }
+
+    simpleserial_put('r', 16, master_key);
+
+}
+
+uint8_t get_pt(uint8_t* pt, uint8_t len) //Gets the plain text
+{
+    simpleserial_put('r', 16, pt);
+    uint8_t cipher[16];
+    return 0x00;
+}
+
 
 int main(void)
 {
@@ -261,47 +227,43 @@ int main(void)
 
     /* Uncomment this to get a HELLO message for debug */
 
-    putch('h');
-	putch('e');
-	putch('l');
-	putch('l');
-	putch('o');
-	putch('\n');
-
 	simpleserial_init();
-    #if SS_VER == SS_VER_2_1
-    simpleserial_addcmd(0x01, 16, aes);
-    #else
+    // #if SS_VER == SS_VER_2_1
+    // simpleserial_addcmd(0x01, 16, aes);
+    // #else
     simpleserial_addcmd('k', 16, get_key);
-    simpleserial_addcmd('p', 16,  get_pt);
-    simpleserial_addcmd('x',  0,   reset);
-    simpleserial_addcmd_flags('m', 18, get_mask, CMD_FLAG_LEN);
-    simpleserial_addcmd('s', 2, enc_multi_setnum);
-    simpleserial_addcmd('f', 16, enc_multi_getpt);
-    #endif
+    simpleserial_addcmd('p', 16, get_pt);
+    // simpleserial_addcmd('p', 16,  get_pt);
+    // simpleserial_addcmd('x',  0,   reset);
+    // simpleserial_addcmd_flags('m', 18, get_mask, CMD_FLAG_LEN);
+    // simpleserial_addcmd('s', 2, enc_multi_setnum);
+    // simpleserial_addcmd('f', 16, enc_multi_getpt);
+    // #endif
     int x=0;
-    while (1) {
-        // ss_puts("new message\n");
-        send_message();
+    // while (1) {
+    //     // ss_puts("new message\n");
+    //     send_message();
         
-        // delay(10000);  // Small delay to prevent flooding
-        for (int i=0; i<100000; i++)
-        {
-            x -= 1;
-            x *= 3;
-            x << 1;
-            x += 1;
-            x *= 3;
-            x << 1;
-            x += 1;
-            x *= 3;
-            x << 1;
-            x += 1;
-            x *= 3;
-            x << 1;
-            x += 1;
-            x*=2;
-        }
+    //     // delay(10000);  // Small delay to prevent flooding
+    //     for (int i=0; i<100000; i++)
+    //     {
+    //         x -= 1;
+    //         x *= 3;
+    //         x << 1;
+    //         x += 1;
+    //         x *= 3;
+    //         x << 1;
+    //         x += 1;
+    //         x *= 3;
+    //         x << 1;
+    //         x += 1;
+    //         x *= 3;
+    //         x << 1;
+    //         x += 1;
+    //         x*=2;
+    //     }
+    // }
+    while(1){
+        simpleserial_get();
     }
-    simpleserial_get();
 }
