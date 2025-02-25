@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+static uint16_t num_encryption_rounds = 10;
+
 uint8_t get_mask(uint8_t* m, uint8_t len)
 {
   aes_indep_mask(m, len);
@@ -34,8 +36,6 @@ uint8_t reset(uint8_t* x, uint8_t len)
     // Reset key here if needed
 	return 0x00;
 }
-
-static uint16_t num_encryption_rounds = 10;
 
 uint8_t enc_multi_getpt(uint8_t* pt, uint8_t len)
 {
@@ -60,6 +60,10 @@ uint8_t enc_multi_setnum(uint8_t* t, uint8_t len)
     num_encryption_rounds |= t[0] << 8;
     return 0;
 }
+
+
+/*----------------------------------------------------------------
+------------------------AES Code--------------------------------*/
 
 uint8_t s_box[256] = {
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
@@ -135,7 +139,10 @@ void inv_sub_bytes(uint8_t s[4][4], uint8_t inv_s_box[]){
 
 // Despite what the colab code says, this is actually shifting columns
 
-void shift_rows(uint8_t s[4][4]){ //This function takes in a 4x4 matrix, shifts all but the first row
+
+//This function takes in a 4x4 array, shifts all but the first row.
+//Returns nothing. The passed-in array is modified.
+void shift_rows(uint8_t s[4][4]){
     // s[0][1], s[1][1], s[2][1], s[3][1] = s[1][1], s[2][1], s[3][1], s[0][1]
     uint8_t temp = s[0][1];
     s[0][1] = s[1][1]; s[1][1] = s[2][1]; s[2][1] = s[3][1]; s[3][1] = temp;
@@ -152,15 +159,18 @@ void shift_rows(uint8_t s[4][4]){ //This function takes in a 4x4 matrix, shifts 
     s[0][3] = s[3][3]; s[1][3] = temp; s[2][3] = temp2; s[3][3] = temp3;
 }
 
-
+//This function takes in a 4x4 array and shifts in the opposite direction
+//Returns nothing. The passed-in array is modified.
 void inv_shift_rows(uint8_t s[4][4]){
     // s[0][1], s[1][1], s[2][1], s[3][1] = s[3][1], s[0][1], s[1][1], s[2][1]
-    uint8_t temp = s[2][1];
-    s[0][1] = s[3][1]; s[1][1] = s[0][1]; s[2][1] = s[1][1]; s[3][1] = temp;
+    uint8_t temp = s[1][1];
+    uint8_t temp2 = s[2][1];
+    ///correct             //incorrect
+    s[1][1] = s[0][1];s[0][1] = s[3][1];  s[2][1] = temp; s[3][1] = temp2;
 
     // s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
     temp = s[0][2];
-    uint8_t temp2 = s[1][2];
+    temp2 = s[1][2];
     s[0][2] = s[2][2]; s[1][2] = s[3][2]; s[2][2] = temp; s[3][2] = temp2;
     
     // s[0][3], s[1][3], s[2][3], s[3][3] = s[1][3], s[2][3], s[3][3], s[0][3]
@@ -170,9 +180,343 @@ void inv_shift_rows(uint8_t s[4][4]){
     s[0][3] = s[1][3]; s[1][3] = s[2][3]; s[2][3] = s[3][3]; s[3][3] = temp;
 }
 
+//This function is for printing out a 4x4 array in hexadecimal form
+//Returns nothing.
+void print4x4(uint8_t s[4][4]){
+    printf("\n");
+    for (int i =0; i < 4; i++)
+    {
+        for (int j=0; j < 4; j++)
+        {
+            printf("%x ", s[i][j]);
+        }
+        printf("\n");
+    }
+}
+
+//This function performs an xtime lamba function
+//Takes in an unsigned 1-bit value and returns an unsigned 1-bit value.
+uint8_t xtime(uint8_t a) {
+    return (a & 0x80) ? (((a << 1) ^ 0x1B) & 0xFF) : (a << 1);
+}
+
+//This function takes in a uint8_t array of size 4 and performs multiple xor operations on it
+//Returns nothing. The passed-in array is modified.
+void mix_single_column(uint8_t a[4]){
+    uint8_t t = a[0] ^ a[1] ^ a[2] ^ a[3];
+    uint8_t u = a[0];
+    a[0] ^= t ^ xtime(a[0] ^ a[1]);
+    a[1] ^= t ^ xtime(a[1] ^ a[2]);
+    a[2] ^= t ^ xtime(a[2] ^ a[3]);
+    a[3] ^= t ^ xtime(a[3] ^ u);
+}
+
+//This function takes in a 2d array and mixes all the columns using the mix_single_column function
+//Returns nothing. The passed-in array is modified.
+void mix_columns(uint8_t s[4][4]){
+    //Remove loop. S dimensions are hard coded anyways.
+    for (int i=0; i<4; i++)
+    {
+        mix_single_column(s[i]);
+    }
+
+}
+
+//This function takes in a 2d array and reverses the mixing of the columns
+//Returns nothing. The passed-in array is modified.
+void inv_mix_columns(uint8_t s[4][4]){
+    // # see Sec 4.1.3 in The Design of Rijndael
+    for (int i=0; i<4; i++){
+        uint8_t u = xtime(xtime(s[i][0] ^ s[i][2]));
+        uint8_t v = xtime(xtime(s[i][1] ^ s[i][3]));
+        s[i][0] ^= u;
+        s[i][1] ^= v;
+        s[i][2] ^= u;
+        s[i][3] ^= v;
+    }
+    // printf("\nRight before mixing again");
+    // print4x4(s);
+    mix_columns(s);
+    // printf("\nRight after mixing");
+    // print4x4(s);
+}
+
+//This function takes in a state array and key array
+//The elements of the state are XORed with the key elements
+//Returns nothing. The passed-in array is modified.
+void add_round_key(uint8_t s[4][4], uint8_t k[4][4]){ //xor the state with a round key
+  for(int i=0; i<4; i++)
+  {
+    for(int j=0; j<4; j++)
+    {
+        s[i][j] ^= k[i][j];
+    }
+  }
+}
+
+// Round constants (Rcon array)
+static const uint8_t r_con[32] = {
+    0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
+    0x80, 0x1B, 0x36, 0x6C, 0xD8, 0xAB, 0x4D, 0x9A,
+    0x2F, 0x5E, 0xBC, 0x63, 0xC6, 0x97, 0x35, 0x6A,
+    0xD4, 0xB3, 0x7D, 0xFA, 0xEF, 0xC5, 0x91, 0x39
+};
+
+//Function takes in 2 arrays: in and a
+//The contents of 1D array in are copied to 2D array a
+//Returns nothing. The passed-in array a is modified.
+void bytes2matrix(uint8_t in[16], uint8_t a[4][4]){
+    for(int i=0; i<4; i++)
+    {
+        for(int j=0; j<4; j++)
+        {
+            a[i][j] = in[i*4 + j];
+        }
+  }
+}
+
+//Function takes in 2 arrays: in and a
+//The contents of 2D array in are copied to 1D array a
+//Returns nothing. The passed-in array a is modified.
+void matrix2bytes(uint8_t in[4][4], uint8_t out[16]){
+    for(int i=0; i<4; i++)
+    {
+        for(int j=0; j<4; j++)
+        {
+            out[i*4 + j] = in[i][j];
+        }
+  }
+}
+
+//Function takes in a column number and 2 arrays: a and out
+//A specific column is copied from a to out
+//Returns nothing. The passed-in array out is modified.
+void getrow(int col, uint8_t a[44][4], uint8_t out[4]){
+    for (int i=0; i<4; i++){
+        out[i] = a[col][i];
+    }
+}
+
+//Function to print a 1D array in hexadecimal form given the length and array pointer
+//Returns and modifies nothing
+void printarray(int len, uint8_t *a){
+    printf("\n");
+    for (int i=0; i<len; i++)
+    {
+        printf("%x ", a[i]);
+    }
+    printf("   \n");
+
+}
+
+//Function to print a 1D array in decimal form given the length and array pointer
+//Returns and modifies nothing
+void printarraydec(int len, uint8_t *a){
+    printf("\n");
+    for (int i=0; i<len; i++)
+    {
+        printf("%d ", a[i]);
+    }
+    printf("   \n");
+
+}
+
+//Shifts the contents of an array in a circular manner
+//Returns nothing. Array a is modified.
+void circularshift(int len, uint8_t *a){
+    uint8_t temp = a[0];
+    for(int i=1; i<len; i++)
+    {
+        a[i-1] = a[i];
+    }
+    a[len-1] = temp;
+}
+
+//Function takes in a word array and the sbox array
+//The elements in word is substituted using sbox
+//Returns nothing. Array word is modified.
+void maptosbox(uint8_t word[4], uint8_t *sbox)
+{
+    for (int i=0; i<4; i++) {word[i] = sbox[word[i]];} //substitutes values in word using sbox
+}
+
+//Function takes in 2 arrays: a and b
+//Returns nothing. a is modified to be equal to a XOR b
+void xor_bytes(uint8_t *a, uint8_t *b) //assume 4 bytes
+{
+    for (int i=0; i<4; i++)
+    {
+        a[i] = a[i]^b[i];
+    }
+}
+
+//Function takes in a master key and 3D key array
+//The master key is used to generate 11 4x4 keys
+//Returns nothing. The passed in keys array is modified.
+void expand_key(uint8_t *master_key, uint8_t keys[11][4][4]){
+    // Expands and returns a list of key matrices for the given master_key.
+    // Master key must be an array of 16 unsigned bytes
+
+    // Initialize round keys with raw key material.
+    // key_columns = bytes2matrix(master_key)
+    uint8_t keycolumns[44][4];
+    bytes2matrix(master_key, keycolumns);
+    // print4x4(keycolumns);
+    int iteration_size = 4; //length of masterkey (16 bytes) / 4
+
+    int i = 1;
+    int kclen = 4;
+    uint8_t word[4];
+    uint8_t previous_iteration_word[4];
+    while (kclen < 44)
+    {
+        getrow(kclen-1, keycolumns, word);
+        if (kclen % iteration_size == 0)
+        {
+            //circular shift
+            circularshift(4, word);
+            //Map to S-Box
+            maptosbox(word, s_box);
+            // XOR with first byte of R-CON, since the others bytes of R-CON are 0.
+            word[0] ^= r_con[i];
+            i += 1;
+        }
+        //removed as master key length is required to be 32 bytes for this 
+        //master key is required to be 16 bytes
+        // else if (kclen % iteration_size == 4) 
+        // {
+        //     printf("kclen\%4 == 4\t now circular shifting");
+
+        // }
+        // # XOR with equivalent word from previous iteration.
+        getrow(kclen-iteration_size, keycolumns, previous_iteration_word);
+        xor_bytes(word, previous_iteration_word);
+        //append word to keycolumns
+        for (int i=0; i<4; i++){keycolumns[kclen][i] = word[i];}
+        kclen += 1;
+    }
+
+    //Set the values in the keys array
+    for (int k=0; k<11; k++)
+    {
+        for(int i=0; i<4; i++)
+        {
+            for(int j=0; j<4; j++)
+            {
+                keys[k][i][j] = keycolumns[k*4 + i][j];
+            }
+        }
+    }
+}
+
+//This function takes in a keys array and prints outs its contents
+//Returns nothing. Nothing is modified.
+void printkeys(uint8_t keys[11][4][4])
+{
+    
+    for (int k=0; k<11; k++)
+    {        
+        printf("---------------------------------\n");
+        printf("Key #%d\n", k);
+        for(int i=0; i<4; i++)
+        {
+            for(int j=0; j<4; j++)
+            {
+                printf("%d ", keys[k][i][j]);
+            }
+            printf("\n");
+        }
+        printf("---------------------------------\n");
+    }
+}
+
+//This function implements the main round of AES encryption
+//This takes in an array for the state and current round key
+//Returns nothing. Instead, the state array is modified to a new state.
+void main_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{ 
+    sub_bytes(state, s_box);
+    shift_rows(state);
+    mix_columns(state);
+    add_round_key(state, round_key);
+}
+
+//This function implements the inverse main round of AES
+//This takes in an array for the state and current round key
+//Returns nothing. Instead, the state array is modified to a new state.
+void inv_main_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  add_round_key(state,round_key);
+  inv_mix_columns(state);
+  inv_shift_rows(state);
+  inv_sub_bytes(state, inv_s_box);
+}
+
+//This function implements the final round of AES encryption
+//This takes in an array for the state and current round key
+//Returns nothing. Instead, the state array is modified to a new state.
+void final_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  sub_bytes(state, s_box);
+  shift_rows(state);
+  add_round_key(state, round_key);
+}
+
+//This function implements the inverse final round of AES
+//This takes in an array for the state and current round key
+//Returns nothing. Instead, the state array is modified to a new state.
+void inv_final_round(uint8_t state[4][4], uint8_t round_key[4][4])
+{
+  add_round_key(state,round_key);
+  inv_shift_rows(state);
+  inv_sub_bytes(state, inv_s_box);
+}
+
+//This function implements the AES encryption
+//This takes in an array for the initial state (plain text) and key
+//Returns nothing. Instead, the state array is modified to a new, final state (cipher).
+void encrypt(uint8_t state[4][4], uint8_t round_key[16])
+{
+  uint8_t keys[11][4][4];
+  expand_key(round_key, keys);
+  add_round_key(state, keys[0]);
+  for (int i=0; i<9; i++)
+  {
+    main_round(state, keys[i+1]);
+  }
+  final_round(state, keys[10]);
+}
+
+//This function implements the AES decryption
+//This takes in an array for the initial state (cipher text) and key
+//Returns nothing. Instead, the state array is modified to a new, final state (plain text).
+void decrypt(uint8_t state[4][4], uint8_t key[4][4]){
+    print4x4(state);
+    uint8_t keys[11][4][4];
+    expand_key(key, keys);
+    inv_final_round(state, keys[10]);
+    for (int i=0; i<9; i++)
+    {
+        inv_main_round(state, keys[9-i]);
+    }
+    add_round_key(state, keys[0]);
+//   return state; //do not need to return.
+}
+
+
+/*----------------------End of AES Code-------------------------
+----------------------------------------------------------------*/
+#define KEYSIZE 16
+#define TEXTSIZE 16
 // static uint8_t received_data[16];
-static uint8_t master_key[16];
-// static uint8_t plain_te[16];
+static uint8_t master_key[KEYSIZE];
+static uint8_t master_key2[KEYSIZE];
+
+static uint8_t plain_in[16]; //plain text from serial
+static uint8_t cipher_in[16]; //cipher text from serial
+static uint8_t cipher_out[16]; //cipher text generated with encrypt
+static uint8_t plain_out[16]; //plain text generated with decrypt
+
 
 #if SS_VER == SS_VER_2_1
 uint8_t aes(uint8_t cmd, uint8_t scmd, uint8_t len, uint8_t *buf)
@@ -191,78 +535,102 @@ void send_message(char *msg) {
     simpleserial_put('r', strlen(msg), (uint8_t *)msg);
 }
 
-uint8_t get_key(uint8_t* k, uint8_t len)
+uint8_t recieve_key(uint8_t* k, uint8_t len)
 {
-    // old
-	// aes_indep_key(k);
-	// return 0x00;
-    // new
-    for (int i=0; i<len; i++)
+
+    if(len != KEYSIZE){
+        const char errormsg[1] = {0xFF};
+        simpleserial_put('r', 1, errormsg);
+    }
+
+    // save the master key
+    for (int i=0; i<KEYSIZE; i++)
     {
         master_key[i] = k[i];
     }
+    aes_indep_key(master_key);
 
-    simpleserial_put('r', 16, master_key);
+    // simpleserial_put('r', 16, master_key);
 
+    const uint8_t success_msg[1] = {0x00};
+    simpleserial_put('r', 1, success_msg);
+
+    return 0;
 }
 
-uint8_t get_pt(uint8_t* pt, uint8_t len) //Gets the plain text
+uint8_t encrypt_pt(uint8_t* pt, uint8_t len) //Gets the plain text from serial
 {
-    simpleserial_put('r', 16, pt);
-    uint8_t cipher[16];
+    if(len != TEXTSIZE){
+        const uint8_t errormsg[16] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+        simpleserial_put('r', 16, errormsg);
+    }
+    for(int i=0; i<TEXTSIZE; i++)
+    {
+        plain_in[i]=pt[i];
+    } 
+
+    //cipher_out will store the current state
+    //The starting state is just the plain text
+    uint8_t state[4][4];
+    bytes2matrix(plain_in, state);
+
+    //encrypt the state
+    encrypt(state, master_key);
+    //save the output to cipher out
+    matrix2bytes(state, cipher_out);
+    // simpleserial_put('r', 16, plain_in);
+    // simpleserial_put('s', 16, state);
+    simpleserial_put('r', 16, cipher_out);
+
     return 0x00;
 }
 
+uint8_t encrypt_library(uint8_t *pt, uint8_t len) {
+    if (len != 16) return 1; // Error if plaintext size is incorrect
+    aes_indep_enc(pt); // Encrypt in place
+    simpleserial_put('r', 16, pt); // Send ciphertext back
+    return 0; // Success
+}
+
+uint8_t decrypt_pt(uint8_t* pt, uint8_t len) //Gets the plain text from serial
+{
+    if(len != TEXTSIZE){
+        const uint8_t errormsg[16] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+        simpleserial_put('r', 16, errormsg);
+    }
+    for(int i=0; i<TEXTSIZE; i++)
+    {
+        cipher_in[i]=pt[i];
+    } 
+
+    //cipher_out will store the current state
+    //The starting state is just the plain text
+    uint8_t state[4][4];
+    bytes2matrix(cipher_in, state);
+
+    //encrypt the state
+    decrypt(state, master_key);
+    //save the output to plaintext out
+    matrix2bytes(state, plain_out);
+    //send the decrypted bytes
+    simpleserial_put('r', 16, plain_out);
+
+    return 0x00;
+}
 
 int main(void)
 {
-	uint8_t tmp[KEY_LENGTH] = {DEFAULT_KEY};
-
     platform_init();
     init_uart();
-    // trigger_setup();
+    trigger_setup();
 
-	// aes_indep_init();
-	// aes_indep_key(tmp);
-
-    /* Uncomment this to get a HELLO message for debug */
+	aes_indep_init();
 
 	simpleserial_init();
-    // #if SS_VER == SS_VER_2_1
-    // simpleserial_addcmd(0x01, 16, aes);
-    // #else
-    simpleserial_addcmd('k', 16, get_key);
-    simpleserial_addcmd('p', 16, get_pt);
-    // simpleserial_addcmd('p', 16,  get_pt);
-    // simpleserial_addcmd('x',  0,   reset);
-    // simpleserial_addcmd_flags('m', 18, get_mask, CMD_FLAG_LEN);
-    // simpleserial_addcmd('s', 2, enc_multi_setnum);
-    // simpleserial_addcmd('f', 16, enc_multi_getpt);
-    // #endif
-    int x=0;
-    // while (1) {
-    //     // ss_puts("new message\n");
-    //     send_message();
-        
-    //     // delay(10000);  // Small delay to prevent flooding
-    //     for (int i=0; i<100000; i++)
-    //     {
-    //         x -= 1;
-    //         x *= 3;
-    //         x << 1;
-    //         x += 1;
-    //         x *= 3;
-    //         x << 1;
-    //         x += 1;
-    //         x *= 3;
-    //         x << 1;
-    //         x += 1;
-    //         x *= 3;
-    //         x << 1;
-    //         x += 1;
-    //         x*=2;
-    //     }
-    // }
+    simpleserial_addcmd('k', 16, recieve_key);
+    simpleserial_addcmd('p', 16, encrypt_pt);
+    simpleserial_addcmd('c', 16, decrypt_pt);
+ 
     while(1){
         simpleserial_get();
     }
