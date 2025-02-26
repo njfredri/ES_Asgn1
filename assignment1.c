@@ -510,7 +510,6 @@ void decrypt(uint8_t state[4][4], uint8_t key[4][4]){
 #define TEXTSIZE 16
 // static uint8_t received_data[16];
 static uint8_t master_key[KEYSIZE];
-static uint8_t master_key2[KEYSIZE];
 
 static uint8_t plain_in[16]; //plain text from serial
 static uint8_t cipher_in[16]; //cipher text from serial
@@ -535,6 +534,8 @@ void send_message(char *msg) {
     simpleserial_put('r', strlen(msg), (uint8_t *)msg);
 }
 
+//This function takes in a 16-byte key from serial and stores it in the masterkey array
+//0xFF is sent if unsuccessful. 0x00 is sent if successful.
 uint8_t recieve_key(uint8_t* k, uint8_t len)
 {
 
@@ -548,7 +549,7 @@ uint8_t recieve_key(uint8_t* k, uint8_t len)
     {
         master_key[i] = k[i];
     }
-    aes_indep_key(master_key);
+    // aes_indep_key(master_key);
 
     // simpleserial_put('r', 16, master_key);
 
@@ -558,6 +559,8 @@ uint8_t recieve_key(uint8_t* k, uint8_t len)
     return 0;
 }
 
+//This function takes a 16-byte plaintext and ecrypts it using the AES implementation
+//The resulting plaintext is sent out via serial communication
 uint8_t encrypt_pt(uint8_t* pt, uint8_t len) //Gets the plain text from serial
 {
     if(len != TEXTSIZE){
@@ -585,13 +588,8 @@ uint8_t encrypt_pt(uint8_t* pt, uint8_t len) //Gets the plain text from serial
     return 0x00;
 }
 
-uint8_t encrypt_library(uint8_t *pt, uint8_t len) {
-    if (len != 16) return 1; // Error if plaintext size is incorrect
-    aes_indep_enc(pt); // Encrypt in place
-    simpleserial_put('r', 16, pt); // Send ciphertext back
-    return 0; // Success
-}
-
+//This function takes a 16-byte ciphertext and ecrypts it using the AES implementation
+//The resulting ciphertext is sent out via serial communication
 uint8_t decrypt_pt(uint8_t* pt, uint8_t len) //Gets the plain text from serial
 {
     if(len != TEXTSIZE){
@@ -623,8 +621,6 @@ int main(void)
     platform_init();
     init_uart();
     trigger_setup();
-
-	aes_indep_init();
 
 	simpleserial_init();
     simpleserial_addcmd('k', 16, recieve_key);
