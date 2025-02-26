@@ -1,0 +1,12 @@
+To run this code, please place assignment1.c, makefile, and assignment1.ipynb in the same folder.
+Preferably in their own folder in the ChipWhisperer jupyter directory.
+
+Edit `FIRMWARE_DIR` in the ipynb file to point to the chipwhisperer firmware directory.
+
+Also make sure to edit the line "cd ../../../hardware/victims/firmware/assignment1" before compiling.
+This directory will need to be manually edited to match where C_DIR is. 
+C_DIR will be printed out in a previous code block, so you can copy that.
+
+In order to use push keys, encrypt, and decrypt , use the functions set_key_cw(), encrypt_plaintext_cw(), and decrypt_ciphertext_cw(). All of these take in a byte array.
+The encrypt and decrypt functions will return the output from the chip.
+Additionally, you can set the print_out arguement to True for the default output to print.
